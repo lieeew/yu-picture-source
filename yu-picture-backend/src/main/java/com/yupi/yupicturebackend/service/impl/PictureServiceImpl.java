@@ -201,9 +201,18 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         }
         // 开启事务
         Long finalSpaceId = spaceId;
+        Long finalPictureId = pictureId;
         transactionTemplate.execute(status -> {
-            // 插入数据
-            boolean result = this.saveOrUpdate(picture);
+            // 先查看是插入数据还是更新数据
+            boolean result = false;
+            if (Objects.isNull(finalPictureId)) {
+                result = this.save(picture);
+            } else {
+                // bug fix: 更新 && 不携带 spaceId
+                Picture updatePicture = new Picture();
+                BeanUtil.copyProperties(picture, updatePicture, "spaceId");
+                result = this.updateById(updatePicture);
+            }
             ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "图片上传失败，数据库操作失败");
             if (finalSpaceId != null) {
                 // 更新空间的使用额度

@@ -7,7 +7,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.EnableAspectJAutoProxy;
 import org.springframework.scheduling.annotation.EnableAsync;
 
-@SpringBootApplication(exclude = {ShardingSphereAutoConfiguration.class})
+@SpringBootApplication
 @EnableAsync
 @MapperScan("com.yupi.yupicturebackend.mapper")
 @EnableAspectJAutoProxy(exposeProxy = true)
