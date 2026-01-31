@@ -12,6 +12,7 @@ import com.yupi.yupicturebackend.manager.websocket.model.PictureEditRequestMessa
 import com.yupi.yupicturebackend.manager.websocket.model.PictureEditResponseMessage;
 import com.yupi.yupicturebackend.model.entity.User;
 import com.yupi.yupicturebackend.service.UserService;
+import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
@@ -20,7 +21,6 @@ import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
-import javax.annotation.Resource;
 import java.io.IOException;
 import java.util.Map;
 import java.util.Set;

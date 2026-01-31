@@ -24,6 +24,15 @@
         <a-button type="primary" :icon="h(FullscreenOutlined)" @click="doImagePainting">
           AI 扩图
         </a-button>
+        <a-button type="primary" :icon="h(HighlightOutlined)" @click="doStyleTransfer">
+          风格转换
+        </a-button>
+        <a-button type="primary" :icon="h(TagsOutlined)" @click="doGenerateTags" :loading="generateTagsLoading">
+          智能标签
+        </a-button>
+        <a-button type="primary" :icon="h(FileTextOutlined)" @click="doRenameByAi" :loading="renameLoading">
+          智能命名
+        </a-button>
       </a-space>
       <ImageCropper
         ref="imageCropperRef"
@@ -38,6 +47,12 @@
         :picture="picture"
         :spaceId="spaceId"
         :onSuccess="onImageOutPaintingSuccess"
+      />
+      <ImageStyleTransfer
+        ref="imageStyleTransferRef"
+        :picture="picture"
+        :spaceId="spaceId"
+        :onSuccess="onImageStyleTransferSuccess"
       />
     </div>
     <!-- 图片信息表单 -->
@@ -85,19 +100,24 @@
 
 <script setup lang="ts">
 import PictureUpload from '@/components/PictureUpload.vue'
-import { computed, h, onMounted, reactive, ref, watchEffect } from 'vue'
+import { computed, h, onMounted, onUnmounted, reactive, ref, watchEffect } from 'vue'
 import { message } from 'ant-design-vue'
 import {
-  editPictureUsingPost,
-  getPictureVoByIdUsingGet,
-  listPictureTagCategoryUsingGet,
+  editPicture,
+  getPictureVoById,
+  listPictureTagCategory,
+  generatePictureTags,
+  renamePictureByAi,
+  getPictureTask,
 } from '@/api/pictureController.ts'
+import { PICTURE_TASK_STATUS_ENUM } from '@/constants/pictureTask'
 import { useRoute, useRouter } from 'vue-router'
 import UrlPictureUpload from '@/components/UrlPictureUpload.vue'
 import ImageCropper from '@/components/ImageCropper.vue'
-import { EditOutlined, FullscreenOutlined } from '@ant-design/icons-vue'
+import { EditOutlined, FullscreenOutlined, HighlightOutlined, TagsOutlined, FileTextOutlined } from '@ant-design/icons-vue'
 import ImageOutPainting from '@/components/ImageOutPainting.vue'
-import { getSpaceVoByIdUsingGet } from '@/api/spaceController.ts'
+import ImageStyleTransfer from '@/components/ImageStyleTransfer.vue'
+import { getSpaceVoById } from '@/api/spaceController.ts'
 
 const router = useRouter()
 const route = useRoute()
@@ -105,6 +125,28 @@ const route = useRoute()
 const picture = ref<API.PictureVO>()
 const pictureForm = reactive<API.PictureEditRequest>({})
 const uploadType = ref<'file' | 'url'>('file')
+// AI 功能加载状态
+const generateTagsLoading = ref(false)
+const renameLoading = ref(false)
+
+// 任务状态枚举
+const TaskStatusEnum = PICTURE_TASK_STATUS_ENUM
+
+// 轮询定时器
+let generateTagsPollingTimer: ReturnType<typeof setInterval> | null = null
+let renamePollingTimer: ReturnType<typeof setInterval> | null = null
+
+// 轮询开始时间
+let generateTagsPollingStartTime: number = 0
+let renamePollingStartTime: number = 0
+
+// 最大轮询时间（3分钟）
+const MAX_POLLING_DURATION = 3 * 60 * 1000
+
+// 任务 ID
+const generateTagsTaskId = ref<number | undefined>(undefined)
+const renameTaskId = ref<number | undefined>(undefined)
+
 // 空间 id
 const spaceId = computed(() => {
   return route.query?.spaceId
@@ -129,7 +171,7 @@ const handleSubmit = async (values: any) => {
   if (!pictureId) {
     return
   }
-  const res = await editPictureUsingPost({
+  const res = await editPicture({
     id: pictureId,
     spaceId: spaceId.value,
     ...values,
@@ -154,7 +196,7 @@ const tagOptions = ref<string[]>([])
  * @param values
  */
 const getTagCategoryOptions = async () => {
-  const res = await listPictureTagCategoryUsingGet()
+  const res = await listPictureTagCategory()
   if (res.data.code === 0 && res.data.data) {
     tagOptions.value = (res.data.data.tagList ?? []).map((data: string) => {
       return {
@@ -182,18 +224,24 @@ const getOldPicture = async () => {
   // 获取到 id
   const id = route.query?.id
   if (id) {
-    const res = await getPictureVoByIdUsingGet({
+    const res = await getPictureVoById({
       id,
     })
     if (res.data.code === 0 && res.data.data) {
-      const data = res.data.data
-      picture.value = data
-      pictureForm.name = data.name
-      pictureForm.introduction = data.introduction
-      pictureForm.category = data.category
-      pictureForm.tags = data.tags
+      updatePictureData(res.data.data)
     }
   }
+}
+
+
+// 更新图片数据
+const updatePictureData = (data: API.PictureVO) => {
+  console.log('[AI] 更新图片数据, name:', data.name, ', tags:', data.tags)
+  picture.value = data
+  pictureForm.name = data.name
+  pictureForm.introduction = data.introduction
+  pictureForm.category = data.category
+  pictureForm.tags = data.tags
 }
 
 onMounted(() => {
@@ -226,6 +274,197 @@ const onImageOutPaintingSuccess = (newPicture: API.PictureVO) => {
   picture.value = newPicture
 }
 
+// ----- AI 风格转换引用 -----
+const imageStyleTransferRef = ref()
+
+// 打开 AI 风格转换弹窗
+const doStyleTransfer = async () => {
+  imageStyleTransferRef.value?.openModal()
+}
+
+// AI 风格转换保存事件
+const onImageStyleTransferSuccess = (newPicture: API.PictureVO) => {
+  picture.value = newPicture
+}
+
+// ----- AI 生成图片标签 -----
+// 开始生成标签轮询
+const startGenerateTagsPolling = (taskId: number) => {
+  generateTagsTaskId.value = taskId
+  generateTagsPollingStartTime = Date.now()
+  console.log('[AI标签] 开始轮询任务, taskId:', taskId)
+  message.loading('AI 生成标签中...', { key: 'generateTags' })
+  
+  generateTagsPollingTimer = setInterval(async () => {
+    // 检查是否超过最大轮询时间
+    if (Date.now() - generateTagsPollingStartTime > MAX_POLLING_DURATION) {
+      message.warning('标签生成超时，请稍后重试', { key: 'generateTags' })
+      generateTagsLoading.value = false
+      stopGenerateTagsPolling()
+      return
+    }
+
+    try {
+      const res = await getPictureTask({ taskId })
+      console.log('[AI标签] 轮询结果:', res.data)
+      if (res.data.code === 0 && res.data.data) {
+        const task = res.data.data
+        console.log('[AI标签] 任务状态:', task.status)
+        
+        switch (task.status) {
+          case TaskStatusEnum.PROCESSING:
+            // 继续等待
+            break
+          case TaskStatusEnum.COMPLETED:
+            console.log('[AI标签] 任务完成, result:', task.result)
+            message.success('标签生成成功', { key: 'generateTags' })
+            generateTagsLoading.value = false
+            stopGenerateTagsPolling()
+            // 刷新页面
+            window.location.reload()
+            break
+          case TaskStatusEnum.FAILED:
+            console.error('[AI标签] 任务失败:', task.errorMessage)
+            message.error('标签生成失败：' + (task.errorMessage || '未知错误'), { key: 'generateTags' })
+            generateTagsLoading.value = false
+            stopGenerateTagsPolling()
+            break
+        }
+      }
+    } catch (error) {
+      console.error('[AI标签] 轮询失败', error)
+    }
+  }, 3000)
+}
+
+// 停止生成标签轮询
+const stopGenerateTagsPolling = () => {
+  if (generateTagsPollingTimer) {
+    clearInterval(generateTagsPollingTimer)
+    generateTagsPollingTimer = null
+  }
+}
+
+// 清理生成标签轮询
+const clearGenerateTagsPolling = () => {
+  stopGenerateTagsPolling()
+  generateTagsTaskId.value = undefined
+}
+
+// AI 生成图片标签
+const doGenerateTags = async () => {
+  if (!picture.value?.id) {
+    return
+  }
+  generateTagsLoading.value = true
+  
+  try {
+    const res = await generatePictureTags({ id: picture.value.id })
+    console.log('[AI标签] API响应:', res.data)
+    if (res.data.code === 0 && res.data.data) {
+      const taskId = res.data.data
+      console.log('[AI标签] 任务ID:', taskId)
+      startGenerateTagsPolling(taskId)
+    } else {
+      message.error('标签生成失败，' + res.data.message)
+      generateTagsLoading.value = false
+    }
+  } catch (error) {
+    console.error('[AI标签] API调用失败', error)
+    message.error('标签生成失败，' + (error as Error).message)
+    generateTagsLoading.value = false
+  }
+}
+
+// ----- AI 重命名图片 -----
+// 开始重命名轮询
+const startRenamePolling = (taskId: number) => {
+  renameTaskId.value = taskId
+  renamePollingStartTime = Date.now()
+  console.log('[AI重命名] 开始轮询任务, taskId:', taskId)
+  message.loading('AI 重命名中...', { key: 'rename' })
+  
+  renamePollingTimer = setInterval(async () => {
+    // 检查是否超过最大轮询时间
+    if (Date.now() - renamePollingStartTime > MAX_POLLING_DURATION) {
+      message.warning('重命名超时，请稍后重试', { key: 'rename' })
+      renameLoading.value = false
+      stopRenamePolling()
+      return
+    }
+
+    try {
+      const res = await getPictureTask({ taskId })
+      console.log('[AI重命名] 轮询结果:', res.data)
+      if (res.data.code === 0 && res.data.data) {
+        const task = res.data.data
+        console.log('[AI重命名] 任务状态:', task.status)
+        
+        switch (task.status) {
+          case TaskStatusEnum.PROCESSING:
+            // 继续等待
+            break
+          case TaskStatusEnum.COMPLETED:
+            console.log('[AI重命名] 任务完成, result:', task.result)
+            message.success('重命名成功', { key: 'rename' })
+            renameLoading.value = false
+            stopRenamePolling()
+            // 刷新页面
+            window.location.reload()
+            break
+          case TaskStatusEnum.FAILED:
+            console.error('[AI重命名] 任务失败:', task.errorMessage)
+            message.error('重命名失败：' + (task.errorMessage || '未知错误'), { key: 'rename' })
+            renameLoading.value = false
+            stopRenamePolling()
+            break
+        }
+      }
+    } catch (error) {
+      console.error('[AI重命名] 轮询失败', error)
+    }
+  }, 3000)
+}
+
+// 停止重命名轮询
+const stopRenamePolling = () => {
+  if (renamePollingTimer) {
+    clearInterval(renamePollingTimer)
+    renamePollingTimer = null
+  }
+}
+
+// 清理重命名轮询
+const clearRenamePolling = () => {
+  stopRenamePolling()
+  renameTaskId.value = undefined
+}
+
+// AI 重命名图片
+const doRenameByAi = async () => {
+  if (!picture.value?.id) {
+    return
+  }
+  renameLoading.value = true
+  
+  try {
+    const res = await renamePictureByAi({ id: picture.value.id })
+    console.log('[AI重命名] API响应:', res.data)
+    if (res.data.code === 0 && res.data.data) {
+      const taskId = res.data.data
+      console.log('[AI重命名] 任务ID:', taskId)
+      startRenamePolling(taskId)
+    } else {
+      message.error('重命名失败，' + res.data.message)
+      renameLoading.value = false
+    }
+  } catch (error) {
+    console.error('[AI重命名] API调用失败', error)
+    message.error('重命名失败，' + (error as Error).message)
+    renameLoading.value = false
+  }
+}
+
 // 获取空间信息
 const space = ref<API.SpaceVO>()
 
@@ -233,7 +472,7 @@ const space = ref<API.SpaceVO>()
 const fetchSpace = async () => {
   // 获取数据
   if (spaceId.value) {
-    const res = await getSpaceVoByIdUsingGet({
+    const res = await getSpaceVoById({
       id: spaceId.value,
     })
     if (res.data.code === 0 && res.data.data) {
@@ -244,6 +483,12 @@ const fetchSpace = async () => {
 
 watchEffect(() => {
   fetchSpace()
+})
+
+// 组件卸载时清理轮询
+onUnmounted(() => {
+  clearGenerateTagsPolling()
+  clearRenamePolling()
 })
 </script>
 

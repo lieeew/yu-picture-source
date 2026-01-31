@@ -1,0 +1,1 @@
+Convert the image into pixel art style. Apply the characteristic blocky, grid-based aesthetic of pixel art. Reduce the image to discrete pixel elements while maintaining recognizable shapes and colors. Include subtle dithering effects where appropriate and keep the retro, video-game inspired charm of classic pixel art.

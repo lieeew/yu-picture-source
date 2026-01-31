@@ -5,6 +5,8 @@
       <a-space>
         <a-button type="primary" href="/add_picture" target="_blank">+ 创建图片</a-button>
         <a-button type="primary" href="/add_picture/batch" target="_blank" ghost>+ 批量创建图片</a-button>
+        <a-button type="primary" href="/add_picture/tags/batch" target="_blank" ghost>批量智能标签</a-button>
+        <a-button type="primary" href="/add_picture/rename/batch" target="_blank" ghost>批量智能命名</a-button>
       </a-space>
     </a-flex>
     <div style="margin-bottom: 16px" />
@@ -55,9 +57,16 @@
           <a-image :src="record.url" :width="120" />
         </template>
         <template v-if="column.dataIndex === 'tags'">
-          <a-space wrap>
-            <a-tag v-for="tag in JSON.parse(record.tags || '[]')" :key="tag">
+          <a-space wrap :size="[4, 4]">
+            <a-tag v-for="tag in getDisplayTags(record)" :key="tag">
               {{ tag }}
+            </a-tag>
+            <a-tag
+              v-if="showMoreButton(record)"
+              class="more-tag"
+              @click="toggleExpand(record)"
+            >
+              {{ isExpanded(record) ? '收起' : `+${getAllTags(record.tags).length - 5}个` }}
             </a-tag>
           </a-space>
         </template>
@@ -112,9 +121,9 @@
 <script lang="ts" setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import {
-  deletePictureUsingPost,
-  doPictureReviewUsingPost,
-  listPictureByPageUsingPost,
+  deletePicture,
+  doPictureReview,
+  listPictureByPage,
 } from '@/api/pictureController.ts'
 import { message } from 'ant-design-vue'
 import {
@@ -123,6 +132,46 @@ import {
   PIC_REVIEW_STATUS_OPTIONS,
 } from '../../constants/picture.ts'
 import dayjs from 'dayjs'
+
+// 展开状态 Map
+const expandedRecords = ref<Set<string>>(new Set())
+
+// 获取所有标签
+const getAllTags = (tagsJson: string) => {
+  try {
+    return JSON.parse(tagsJson || '[]')
+  } catch {
+    return []
+  }
+}
+
+// 显示更多按钮的条件
+const showMoreButton = (record: API.Picture) => {
+  return getAllTags(record.tags).length > 5
+}
+
+// 根据展开状态获取显示的标签
+const getDisplayTags = (record: API.Picture) => {
+  const allTags = getAllTags(record.tags)
+  if (expandedRecords.value.has(record.id)) {
+    return allTags
+  }
+  return allTags.slice(0, 5)
+}
+
+// 检查是否展开
+const isExpanded = (record: API.Picture) => {
+  return expandedRecords.value.has(record.id)
+}
+
+// 切换展开状态
+const toggleExpand = (record: API.Picture) => {
+  if (expandedRecords.value.has(record.id)) {
+    expandedRecords.value.delete(record.id)
+  } else {
+    expandedRecords.value.add(record.id)
+  }
+}
 
 const columns = [
   {
@@ -197,7 +246,7 @@ const searchParams = reactive<API.PictureQueryRequest>({
 
 // 获取数据
 const fetchData = async () => {
-  const res = await listPictureByPageUsingPost({
+  const res = await listPictureByPage({
     ...searchParams,
     nullSpaceId: true,
   })
@@ -244,7 +293,7 @@ const doDelete = async (id: string) => {
   if (!id) {
     return
   }
-  const res = await deletePictureUsingPost({ id })
+  const res = await deletePicture({ id })
   if (res.data.code === 0) {
     message.success('删除成功')
     // 刷新数据
@@ -258,7 +307,7 @@ const doDelete = async (id: string) => {
 const handleReview = async (record: API.Picture, reviewStatus: number) => {
   const reviewMessage =
     reviewStatus === PIC_REVIEW_STATUS_ENUM.PASS ? '管理员操作通过' : '管理员操作拒绝'
-  const res = await doPictureReviewUsingPost({
+  const res = await doPictureReview({
     id: record.id,
     reviewStatus,
     reviewMessage,
@@ -272,3 +321,16 @@ const handleReview = async (record: API.Picture, reviewStatus: number) => {
   }
 }
 </script>
+
+<style scoped>
+:deep(.more-tag) {
+  cursor: pointer;
+  transition: none !important;
+  animation: none !important;
+  transform: none !important;
+}
+
+:deep(.more-tag:hover) {
+  opacity: 0.8;
+}
+</style>

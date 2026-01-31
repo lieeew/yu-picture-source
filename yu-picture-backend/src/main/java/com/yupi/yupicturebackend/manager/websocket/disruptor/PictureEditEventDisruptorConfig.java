@@ -2,10 +2,9 @@ package com.yupi.yupicturebackend.manager.websocket.disruptor;
 
 import cn.hutool.core.thread.ThreadFactoryBuilder;
 import com.lmax.disruptor.dsl.Disruptor;
+import jakarta.annotation.Resource;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-
-import javax.annotation.Resource;
 
 /**
  * 图片编辑事件 Disruptor 配置

@@ -34,14 +34,12 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { reactive, ref } from 'vue'
 import { message } from 'ant-design-vue'
 import {
-  getPictureVoByIdUsingGet,
-  listPictureTagCategoryUsingGet,
-  uploadPictureByBatchUsingPost,
+  uploadPictureByBatch,
 } from '@/api/pictureController.ts'
-import { useRoute, useRouter } from 'vue-router'
+import { useRouter } from 'vue-router'
 
 const formData = reactive<API.PictureUploadByBatchRequest>({
   count: 10,
@@ -57,7 +55,7 @@ const router = useRouter()
  */
 const handleSubmit = async (values: any) => {
   loading.value = true
-  const res = await uploadPictureByBatchUsingPost({
+  const res = await uploadPictureByBatch({
     ...formData,
   })
   // 操作成功

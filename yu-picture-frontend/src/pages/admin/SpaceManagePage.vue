@@ -86,7 +86,7 @@
 </template>
 <script lang="ts" setup>
 import { computed, onMounted, reactive, ref } from 'vue'
-import { deleteSpaceUsingPost, listSpaceByPageUsingPost } from '@/api/spaceController.ts'
+import { deleteSpace, listSpaceByPage } from '@/api/spaceController.ts'
 import { message } from 'ant-design-vue'
 import dayjs from 'dayjs'
 import {
@@ -152,7 +152,7 @@ const searchParams = reactive<API.SpaceQueryRequest>({
 
 // 获取数据
 const fetchData = async () => {
-  const res = await listSpaceByPageUsingPost({
+  const res = await listSpaceByPage({
     ...searchParams,
   })
   if (res.data.code === 0 && res.data.data) {
@@ -198,7 +198,7 @@ const doDelete = async (id: string) => {
   if (!id) {
     return
   }
-  const res = await deleteSpaceUsingPost({ id })
+  const res = await deleteSpace({ id })
   if (res.data.code === 0) {
     message.success('删除成功')
     // 刷新数据

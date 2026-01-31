@@ -56,7 +56,7 @@ import { HomeOutlined, LogoutOutlined, UserOutlined } from '@ant-design/icons-vu
 import { MenuProps, message } from 'ant-design-vue'
 import { useRouter } from 'vue-router'
 import { useLoginUserStore } from '@/stores/useLoginUserStore.ts'
-import { userLogoutUsingPost } from '@/api/userController.ts'
+import { userLogout } from '@/api/userController.ts'
 
 const loginUserStore = useLoginUserStore()
 
@@ -129,7 +129,7 @@ const doMenuClick = ({ key }) => {
 
 // 用户注销
 const doLogout = async () => {
-  const res = await userLogoutUsingPost()
+  const res = await userLogout()
   if (res.data.code === 0) {
     loginUserStore.setLoginUser({
       userName: '未登录',

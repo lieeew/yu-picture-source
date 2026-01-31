@@ -1,10 +1,10 @@
 package com.yupi.yupicturebackend.model.entity;
 
 import com.baomidou.mybatisplus.annotation.*;
+import lombok.Data;
 
 import java.io.Serializable;
 import java.util.Date;
-import lombok.Data;
 
 /**
  * 图片
@@ -129,6 +129,11 @@ public class Picture implements Serializable {
      */
     @TableLogic
     private Integer isDelete;
+
+    /**
+     * AI 图片描述信息
+     */
+    private String contentDescription;
 
     @TableField(exist = false)
     private static final long serialVersionUID = 1L;

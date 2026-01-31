@@ -2,13 +2,18 @@ package com.yupi.yupicturebackend.service.impl;
 
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.collection.CollUtil;
+import cn.hutool.core.io.resource.ResourceUtil;
+import cn.hutool.core.util.NumberUtil;
 import cn.hutool.core.util.ObjUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.yupi.yupicturebackend.ai.AiChatClient;
+import com.yupi.yupicturebackend.ai.search.AdvanceSearch;
 import com.yupi.yupicturebackend.api.aliyunai.AliYunAiApi;
+import com.yupi.yupicturebackend.api.aliyunai.MultiModalImageEditApi;
 import com.yupi.yupicturebackend.api.aliyunai.model.CreateOutPaintingTaskRequest;
 import com.yupi.yupicturebackend.api.aliyunai.model.CreateOutPaintingTaskResponse;
 import com.yupi.yupicturebackend.exception.BusinessException;
@@ -23,18 +28,26 @@ import com.yupi.yupicturebackend.mapper.PictureMapper;
 import com.yupi.yupicturebackend.model.dto.file.UploadPictureResult;
 import com.yupi.yupicturebackend.model.dto.picture.*;
 import com.yupi.yupicturebackend.model.entity.Picture;
+import com.yupi.yupicturebackend.model.entity.PictureTask;
 import com.yupi.yupicturebackend.model.entity.Space;
 import com.yupi.yupicturebackend.model.entity.User;
 import com.yupi.yupicturebackend.model.enums.PictureReviewStatusEnum;
+import com.yupi.yupicturebackend.model.enums.PictureStyleEnum;
+import com.yupi.yupicturebackend.model.enums.PictureTaskStatusEnum;
+import com.yupi.yupicturebackend.model.enums.PictureTaskTypeEnum;
 import com.yupi.yupicturebackend.model.vo.PictureVO;
 import com.yupi.yupicturebackend.model.vo.UserVO;
 import com.yupi.yupicturebackend.service.PictureService;
+import com.yupi.yupicturebackend.service.PictureTaskService;
 import com.yupi.yupicturebackend.service.SpaceService;
 import com.yupi.yupicturebackend.service.UserService;
 import com.yupi.yupicturebackend.utils.ColorSimilarUtils;
 import com.yupi.yupicturebackend.utils.ColorTransformUtils;
+import jakarta.annotation.Resource;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
-import org.checkerframework.checker.units.qual.C;
+import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -45,12 +58,11 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
-import javax.annotation.Resource;
-import javax.servlet.http.HttpServletRequest;
 import java.awt.*;
 import java.io.IOException;
 import java.util.*;
 import java.util.List;
+import java.util.concurrent.Executor;
 import java.util.stream.Collectors;
 
 /**
@@ -86,6 +98,23 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
 
     @Resource
     private AliYunAiApi aliYunAiApi;
+
+    @Resource
+    private MultiModalImageEditApi multiModalImageEditApi;
+
+    @Resource
+    private PictureTaskService pictureTaskService;
+
+    @Resource
+    private AiChatClient aiChatClient;
+
+    @Resource
+    private AdvanceSearch advanceSearch;
+
+    @Resource
+    private Executor pictureTaskExecutor;
+
+    private static final String STYLE_TRANSFER_PATH_PREFIX = "style_transfer";
 
     @Override
     public void validPicture(Picture picture) {
@@ -656,6 +685,307 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
             throw new BusinessException(ErrorCode.OPERATION_ERROR, "名称解析错误");
         }
     }
+
+    @Override
+    public Long styleTransferPicture(PictureStyleTransferRequest request, User loginUser) {
+        Long pictureId = request.getPictureId();
+        ThrowUtils.throwIf(pictureId == null || pictureId <= 0, ErrorCode.PARAMS_ERROR, "图片 ID 不合法");
+        String style = request.getStyle();
+        ThrowUtils.throwIf(StrUtil.isBlank(style), ErrorCode.PARAMS_ERROR, "风格不能为空");
+
+        PictureStyleEnum styleEnum = PictureStyleEnum.getEnumByValue(style);
+        ThrowUtils.throwIf(styleEnum == null, ErrorCode.PARAMS_ERROR, "不支持的风格类型");
+
+        Picture originalPicture = this.getById(pictureId);
+        ThrowUtils.throwIf(originalPicture == null, ErrorCode.NOT_FOUND_ERROR, "图片不存在");
+
+        PictureTask task = savePictureTask(loginUser, pictureId, PictureTaskTypeEnum.STYLE_TRANSFER);
+        pictureTaskExecutor.execute(() -> executeStyleTransfer(task, pictureId, styleEnum));
+        return task.getId();
+    }
+
+    private Picture getNewStylePicture(String prompt, Picture originalPicture, PictureStyleEnum styleEnum) {
+        String resultUrl = multiModalImageEditApi.getImageUrl(prompt, originalPicture.getUrl());
+
+        String originalPictureName = originalPicture.getName();
+        String newPictureName = StringUtils.isNoneBlank(originalPictureName) ? originalPictureName : styleEnum.getText();
+
+        UploadPictureResult uploadResult = urlPictureUpload.uploadPicture(resultUrl, STYLE_TRANSFER_PATH_PREFIX);
+
+        Picture newPicture = new Picture();
+        newPicture.setUrl(uploadResult.getUrl());
+        newPicture.setThumbnailUrl(uploadResult.getThumbnailUrl());
+        newPicture.setName(newPictureName);
+        newPicture.setPicSize(uploadResult.getPicSize());
+        newPicture.setPicWidth(uploadResult.getPicWidth());
+        newPicture.setPicHeight(uploadResult.getPicHeight());
+        newPicture.setPicScale(uploadResult.getPicScale());
+        newPicture.setPicFormat(uploadResult.getPicFormat());
+        newPicture.setSpaceId(originalPicture.getSpaceId());
+        newPicture.setUserId(originalPicture.getUserId());
+        newPicture.setPicColor(ColorTransformUtils.getStandardColor(uploadResult.getPicColor()));
+        newPicture.setReviewStatus(PictureReviewStatusEnum.REJECT.getValue());
+        return newPicture;
+    }
+
+    @Override
+    public List<Long> styleTransferPictureByBatch(PictureStyleTransferTaskRequest request, User loginUser) {
+        List<Long> pictureIdList = request.getPictureIdList();
+        String style = request.getStyle();
+        ThrowUtils.throwIf(CollUtil.isEmpty(pictureIdList), ErrorCode.PARAMS_ERROR, "图片列表不能为空");
+        ThrowUtils.throwIf(StrUtil.isBlank(style), ErrorCode.PARAMS_ERROR, "风格不能为空");
+
+        PictureStyleEnum styleEnum = PictureStyleEnum.getEnumByValue(style);
+        ThrowUtils.throwIf(styleEnum == null, ErrorCode.PARAMS_ERROR, "不支持的风格类型");
+
+        boolean existNotFound = pictureIdList.stream().anyMatch(id -> this.getById(id) == null);
+        ThrowUtils.throwIf(existNotFound, ErrorCode.NOT_FOUND_ERROR, "存在图片不存在");
+
+        List<Long> taskIdList = new ArrayList<>(pictureIdList.size());
+        for (Long pictureId : pictureIdList) {
+            PictureTask task = savePictureTask(loginUser, pictureId, PictureTaskTypeEnum.STYLE_TRANSFER);
+            taskIdList.add(task.getId());
+            pictureTaskExecutor.execute(() -> executeStyleTransfer(task, pictureId, styleEnum));
+        }
+        return taskIdList;
+    }
+
+    private void executeStyleTransfer(PictureTask task, Long pictureId, PictureStyleEnum styleEnum) {
+        try {
+            String prompt = loadStylePrompt(styleEnum.getPromptFile());
+            Picture originalPicture = this.getById(pictureId);
+            Picture newStylePicture = getNewStylePicture(prompt, originalPicture, styleEnum);
+            this.save(newStylePicture);
+            task.setResultPictureId(newStylePicture.getId());
+            task.setStatus(PictureTaskStatusEnum.COMPLETED.getValue());
+            pictureTaskService.updateById(task);
+        } catch (Exception e) {
+            log.error("风格转换失败, pictureId={}", pictureId, e);
+            task.setStatus(PictureTaskStatusEnum.FAILED.getValue());
+            task.setErrorMessage(ExceptionUtils.getRootCauseMessage(e));
+            pictureTaskService.updateById(task);
+        }
+    }
+
+
+    private PictureTask savePictureTask(User loginUser, Long pictureId, PictureTaskTypeEnum taskTypeEnum) {
+        PictureTask task = new PictureTask();
+        task.setTaskType(taskTypeEnum.getValue());
+        task.setOriginalPictureId(pictureId);
+        task.setStatus(PictureTaskStatusEnum.PROCESSING.getValue());
+        task.setUserId(loginUser.getId());
+        pictureTaskService.save(task);
+        return task;
+    }
+
+    private String loadStylePrompt(String promptFile) {
+        try {
+            return ResourceUtil.readUtf8Str(promptFile);
+        } catch (Exception e) {
+            log.error("加载提示词文件失败: {}", promptFile, e);
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "加载提示词失败");
+        }
+    }
+
+    @Override
+    public void applyPictureTaskResult(Long taskId, Long pictureId, User loginUser) {
+        PictureTask task = pictureTaskService.getByIdAndUserId(taskId, loginUser.getId());
+        ThrowUtils.throwIf(task == null, ErrorCode.NOT_FOUND_ERROR, "任务不存在");
+        ThrowUtils.throwIf(task.getStatus() != PictureTaskStatusEnum.COMPLETED.getValue(), ErrorCode.OPERATION_ERROR, "任务未完成");
+
+        Long originalPictureId = task.getOriginalPictureId();
+        ThrowUtils.throwIf(originalPictureId.equals(pictureId), ErrorCode.PARAMS_ERROR);
+
+        Picture originalPicture = this.getById(originalPictureId);
+        ThrowUtils.throwIf(originalPicture == null, ErrorCode.NOT_FOUND_ERROR, "图片不存在");
+
+        Long resultPictureId = task.getResultPictureId();
+        Picture targetPicture = this.getById(resultPictureId);
+        ThrowUtils.throwIf(targetPicture == null, ErrorCode.NOT_FOUND_ERROR, "图片不存在");
+        checkPictureAuth(loginUser, targetPicture);
+
+        String taskType = task.getTaskType();
+        ThrowUtils.throwIf(!PictureTaskTypeEnum.STYLE_TRANSFER.getValue().equals(taskType), ErrorCode.PARAMS_ERROR);
+
+        originalPicture.setThumbnailUrl(targetPicture.getThumbnailUrl());
+        originalPicture.setUrl(targetPicture.getUrl());
+        originalPicture.setPicSize(targetPicture.getPicSize());
+        originalPicture.setPicWidth(targetPicture.getPicWidth());
+        originalPicture.setPicHeight(targetPicture.getPicHeight());
+        originalPicture.setPicScale(targetPicture.getPicScale());
+        originalPicture.setPicFormat(targetPicture.getPicFormat());
+
+        this.fillReviewParams(originalPicture, loginUser);
+        this.updateById(originalPicture);
+    }
+
+    @Override
+    public String genPictureDescription(Long pictureId, User loginUser) {
+        ThrowUtils.throwIf(pictureId == null || pictureId <= 0, ErrorCode.PARAMS_ERROR, "图片 ID 不合法");
+        ThrowUtils.throwIf(loginUser == null, ErrorCode.NO_AUTH_ERROR);
+
+        Picture picture = this.getById(pictureId);
+        ThrowUtils.throwIf(picture == null, ErrorCode.NOT_FOUND_ERROR, "图片不存在");
+
+        String contentDescription = picture.getContentDescription();
+        if (StrUtil.isNotBlank(contentDescription)) {
+            log.info("图片已有描述信息，跳过生成，pictureId={}", pictureId);
+            return contentDescription;
+        }
+
+        String description = aiChatClient.getImageContentDescription(picture.getUrl());
+        picture.setContentDescription(description);
+        this.updateById(picture);
+        Thread.startVirtualThread(() -> writeDescriptionToVector(pictureId));
+        return description;
+    }
+
+    private void writeDescriptionToVector(Long pictureId) {
+        try {
+            advanceSearch.writePictureDescriptionToVector(pictureId);
+        } catch (Exception e) {
+            log.error("写入向量库失败, pictureId={}", pictureId, e);
+        }
+    }
+
+    @Override
+    public void editPictureByAi(Picture picture) {
+        Long pictureId = picture.getId();
+        ThrowUtils.throwIf(pictureId == null, ErrorCode.PARAMS_ERROR, "图片 ID 不能为空");
+
+        Picture oldPicture = this.getById(pictureId);
+        ThrowUtils.throwIf(oldPicture == null, ErrorCode.NOT_FOUND_ERROR, "图片不存在");
+
+        if (StrUtil.isNotBlank(picture.getName())) {
+            oldPicture.setName(picture.getName());
+        }
+        if (StrUtil.isNotBlank(picture.getTags())) {
+            oldPicture.setTags(picture.getTags());
+        }
+
+        this.updateById(oldPicture);
+    }
+
+    @Override
+    public Long generatePictureTags(Long pictureId, User loginUser) {
+        ThrowUtils.throwIf(pictureId == null || pictureId <= 0, ErrorCode.PARAMS_ERROR, "图片 ID 不合法");
+        ThrowUtils.throwIf(loginUser == null, ErrorCode.NO_AUTH_ERROR);
+
+        Picture picture = this.getById(pictureId);
+        ThrowUtils.throwIf(picture == null, ErrorCode.NOT_FOUND_ERROR, "图片不存在");
+
+        PictureTask task = savePictureTask(loginUser, pictureId, PictureTaskTypeEnum.TAG_RECOGNITION);
+        pictureTaskExecutor.execute(() -> executeGenerateTags(task, pictureId, loginUser));
+        return task.getId();
+    }
+
+    private void executeGenerateTags(PictureTask task, Long pictureId, User loginUser) {
+        try {
+            String description = this.genPictureDescription(pictureId, loginUser);
+            Boolean success = aiChatClient.getPictureTags(String.valueOf(pictureId), String.format("图片 json 描述信息: %s", description));
+            ThrowUtils.throwIf(!success, ErrorCode.PARAMS_ERROR, "生成出现报错");
+            task.setStatus(PictureTaskStatusEnum.COMPLETED.getValue());
+            pictureTaskService.updateById(task);
+        } catch (Exception e) {
+            log.error("标签生成失败, pictureId={}", pictureId, e);
+            task.setStatus(PictureTaskStatusEnum.FAILED.getValue());
+            task.setErrorMessage(ExceptionUtils.getRootCauseMessage(e));
+            pictureTaskService.updateById(task);
+        }
+    }
+
+    @Override
+    public Long renamePictureByAI(Long pictureId, User loginUser) {
+        ThrowUtils.throwIf(pictureId == null || pictureId <= 0, ErrorCode.PARAMS_ERROR, "图片 ID 不合法");
+        ThrowUtils.throwIf(loginUser == null, ErrorCode.NO_AUTH_ERROR);
+
+        Picture picture = this.getById(pictureId);
+        ThrowUtils.throwIf(picture == null, ErrorCode.NOT_FOUND_ERROR, "图片不存在");
+
+        PictureTask task = savePictureTask(loginUser, pictureId, PictureTaskTypeEnum.RENAME);
+        pictureTaskExecutor.execute(() -> executeRenamePicture(task, pictureId, loginUser));
+        return task.getId();
+    }
+
+    private void executeRenamePicture(PictureTask task, Long pictureId, User loginUser) {
+        try {
+            String description = this.genPictureDescription(pictureId, loginUser);
+            Boolean success = aiChatClient.getPictureName(String.valueOf(pictureId), description);
+            ThrowUtils.throwIf(!success, ErrorCode.PARAMS_ERROR, "生成出现报错");
+            task.setStatus(PictureTaskStatusEnum.COMPLETED.getValue());
+            pictureTaskService.updateById(task);
+        } catch (Exception e) {
+            log.error("重命名失败, pictureId={}", pictureId, e);
+            task.setStatus(PictureTaskStatusEnum.FAILED.getValue());
+            task.setErrorMessage(ExceptionUtils.getRootCauseMessage(e));
+            pictureTaskService.updateById(task);
+        }
+    }
+
+    @Override
+    public List<Long> generatePictureTagsByBatch(List<Long> pictureIdList, User loginUser) {
+        ThrowUtils.throwIf(CollUtil.isEmpty(pictureIdList), ErrorCode.PARAMS_ERROR, "图片列表不能为空");
+        ThrowUtils.throwIf(loginUser == null, ErrorCode.NO_AUTH_ERROR);
+        boolean existNotFound = pictureIdList.stream().anyMatch(id -> this.getById(id) == null);
+        ThrowUtils.throwIf(existNotFound, ErrorCode.NOT_FOUND_ERROR, "存在图片不存在");
+        List<Long> taskIdList = new ArrayList<>(pictureIdList.size());
+        for (Long pictureId : pictureIdList) {
+            PictureTask task = savePictureTask(loginUser, pictureId, PictureTaskTypeEnum.TAG_RECOGNITION);
+            taskIdList.add(task.getId());
+            pictureTaskExecutor.execute(() -> executeGenerateTags(task, pictureId, loginUser));
+        }
+        return taskIdList;
+    }
+
+    @Override
+    public List<Long> renamePictureByAIByBatch(List<Long> pictureIdList, User loginUser) {
+        ThrowUtils.throwIf(CollUtil.isEmpty(pictureIdList), ErrorCode.PARAMS_ERROR, "图片列表不能为空");
+        ThrowUtils.throwIf(loginUser == null, ErrorCode.NO_AUTH_ERROR);
+        boolean existNotFound = pictureIdList.stream().anyMatch(id -> this.getById(id) == null);
+        ThrowUtils.throwIf(existNotFound, ErrorCode.NOT_FOUND_ERROR, "存在图片不存在");
+        List<Long> taskIdList = new ArrayList<>(pictureIdList.size());
+        for (Long pictureId : pictureIdList) {
+            PictureTask task = savePictureTask(loginUser, pictureId, PictureTaskTypeEnum.RENAME);
+            taskIdList.add(task.getId());
+            pictureTaskExecutor.execute(() -> executeRenamePicture(task, pictureId, loginUser));
+        }
+        return taskIdList;
+    }
+
+    @Override
+    public void searchPictureByText(String searchText, Page<Picture> pages) {
+        ThrowUtils.throwIf(pages == null, ErrorCode.SYSTEM_ERROR);
+        List<Long> pictureIds = pages.getRecords().stream().map(Picture::getId).toList();
+        int topN = (int) NumberUtil.mul(pages.getSize(), pages.getCurrent());
+        List<Picture> pictures = advanceSearch.searchByText(searchText, pictureIds, topN);
+        pages.setRecords(pictures);
+    }
+
+    @Override
+    public List<Long> getPublicApprovedPictureIds() {
+        return this.lambdaQuery()
+                .select(Picture::getId)
+                .eq(Picture::getReviewStatus, PictureReviewStatusEnum.PASS.getValue())
+                .isNull(Picture::getSpaceId)
+                .list().stream()
+                .map(Picture::getId)
+                .toList();
+    }
+
+    @Override
+    public List<PictureVO> searchPicture(SearchPictureRequest searchPictureRequest, HttpServletRequest httpRequest) {
+        Long pictureId = searchPictureRequest.getPictureId();
+        Integer topK = searchPictureRequest.getTopK();
+
+        Picture picture = this.getById(pictureId);
+        ThrowUtils.throwIf(picture == null, ErrorCode.NOT_FOUND_ERROR);
+
+        List<Long> pictureIds = getPublicApprovedPictureIds()
+                .stream().filter(id -> !id.equals(pictureId)).toList();
+        List<Picture> pictures = advanceSearch.searchByPicture(pictureId, pictureIds, topK);
+        return pictures.stream().map(p -> this.getPictureVO(p, httpRequest)).toList();
+    }
+
 }
 
 

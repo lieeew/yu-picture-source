@@ -23,7 +23,7 @@
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
 import { message } from 'ant-design-vue'
-import { exchangeVipUsingPost } from '@/api/userController.ts'
+import { exchangeVip } from '@/api/userController.ts'
 import { useRouter } from 'vue-router'
 
 // 表单数据
@@ -50,7 +50,7 @@ const handleSubmit = async () => {
 
   try {
     // 调用兑换 API
-    const res = await exchangeVipUsingPost({
+    const res = await exchangeVip({
       vipCode: formData.vipCode,
     })
 

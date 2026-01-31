@@ -51,7 +51,7 @@ import {
   SearchOutlined,
   ShareAltOutlined,
 } from '@ant-design/icons-vue'
-import { deletePictureUsingPost } from '@/api/pictureController.ts'
+import { deletePicture } from '@/api/pictureController.ts'
 import { message } from 'ant-design-vue'
 import ShareModal from '@/components/ShareModal.vue'
 import { ref } from 'vue'
@@ -111,7 +111,7 @@ const doDelete = async (picture, e) => {
   if (!id) {
     return
   }
-  const res = await deletePictureUsingPost({ id })
+  const res = await deletePicture({ id })
   if (res.data.code === 0) {
     message.success('删除成功')
     props.onReload?.()

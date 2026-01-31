@@ -8,9 +8,8 @@ import com.yupi.yupicturebackend.model.dto.picture.*;
 import com.yupi.yupicturebackend.model.entity.Picture;
 import com.yupi.yupicturebackend.model.entity.User;
 import com.yupi.yupicturebackend.model.vo.PictureVO;
-import org.springframework.web.multipart.MultipartFile;
+import jakarta.servlet.http.HttpServletRequest;
 
-import javax.servlet.http.HttpServletRequest;
 import java.util.List;
 
 /**
@@ -148,4 +147,107 @@ public interface PictureService extends IService<Picture> {
      * @param loginUser
      */
     CreateOutPaintingTaskResponse createPictureOutPaintingTask(CreatePictureOutPaintingTaskRequest createPictureOutPaintingTaskRequest, User loginUser);
+
+    /**
+     * 风格转换图片
+     *
+     * @param pictureStyleTransferRequest
+     * @param loginUser
+     * @return
+     */
+    Long styleTransferPicture(PictureStyleTransferRequest pictureStyleTransferRequest, User loginUser);
+
+    /**
+     * 批量风格转换图片
+     *
+     * @param request
+     * @param loginUser
+     * @return 任务ID列表
+     */
+    List<Long> styleTransferPictureByBatch(PictureStyleTransferTaskRequest request, User loginUser);
+
+    /**
+     * 应用任务结果到图片
+     *
+     * @param taskId
+     * @param pictureId
+     * @param loginUser
+     */
+    void applyPictureTaskResult(Long taskId, Long pictureId, User loginUser);
+
+    /**
+     * 生成图片 JSON 描述
+     *
+     * @param pictureId
+     * @param loginUser
+     * @return
+     */
+    String genPictureDescription(Long pictureId, User loginUser);
+
+    /**
+     * AI 编辑图片（仅更新指定字段）
+     *
+     * @param picture
+     */
+    void editPictureByAi(Picture picture);
+
+    /**
+     * AI 自动生成图片标签
+     *
+     * @param pictureId
+     * @param loginUser
+     * @return 任务 ID
+     */
+    Long generatePictureTags(Long pictureId, User loginUser);
+
+    /**
+     * AI 重命名图片
+     *
+     * @param pictureId
+     * @param loginUser
+     * @return 任务 ID
+     */
+    Long renamePictureByAI(Long pictureId, User loginUser);
+
+    /**
+     * AI 批量生成图片标签
+     *
+     * @param pictureIdList
+     * @param loginUser
+     * @return 任务 ID 列表
+     */
+    List<Long> generatePictureTagsByBatch(List<Long> pictureIdList, User loginUser);
+
+    /**
+     * AI 批量重命名图片
+     *
+     * @param pictureIdList
+     * @param loginUser
+     * @return 任务 ID 列表
+     */
+    List<Long> renamePictureByAIByBatch(List<Long> pictureIdList, User loginUser);
+
+    /**
+     * rag 搜索
+     *
+     * @param searchText
+     * @param pages
+     * @return
+     */
+    void searchPictureByText(String searchText, Page<Picture> pages);
+
+    /**
+     * 获取公共空间且审核通过的图片ID列表
+     * @return 图片ID列表
+     */
+    List<Long> getPublicApprovedPictureIds();
+
+
+    /**
+     * 根据图片标签搜索相似图片
+     * @param searchPictureByTagsRequest
+     * @param httpRequest
+     * @return 相似图片列表
+     */
+    List<PictureVO> searchPicture(SearchPictureRequest searchPictureByTagsRequest, HttpServletRequest httpRequest);
 }

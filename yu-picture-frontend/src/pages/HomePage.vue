@@ -9,6 +9,12 @@
         size="large"
         @search="doSearch"
       />
+      <a-switch
+        v-model:checked="enableRagSearch"
+        checked-children="AI搜索"
+        un-checked-children="普通搜索"
+        class="search-switch"
+      />
     </div>
     <!-- 分类和标签筛选 -->
     <a-tabs v-model:active-key="selectedCategory" @change="doSearch">
@@ -44,8 +50,8 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import {
-  listPictureTagCategoryUsingGet,
-  listPictureVoByPageUsingPost,
+  listPictureTagCategory,
+  listPictureVoByPage,
 } from '@/api/pictureController.ts'
 import { message } from 'ant-design-vue'
 import PictureList from '@/components/PictureList.vue' // 定义数据
@@ -63,6 +69,9 @@ const searchParams = reactive<API.PictureQueryRequest>({
   sortOrder: 'descend',
 })
 
+// 是否开启 AI 搜索
+const enableRagSearch = ref(false)
+
 // 获取数据
 const fetchData = async () => {
   loading.value = true
@@ -70,6 +79,7 @@ const fetchData = async () => {
   const params = {
     ...searchParams,
     tags: [] as string[],
+    enableRagSearch: enableRagSearch.value,
   }
   if (selectedCategory.value !== 'all') {
     params.category = selectedCategory.value
@@ -80,7 +90,7 @@ const fetchData = async () => {
       params.tags.push(tagList.value[index])
     }
   })
-  const res = await listPictureVoByPageUsingPost(params)
+  const res = await listPictureVoByPage(params)
   if (res.data.code === 0 && res.data.data) {
     dataList.value = res.data.data.records ?? []
     total.value = res.data.data.total ?? 0
@@ -120,7 +130,7 @@ const selectedTagList = ref<boolean[]>([])
  * @param values
  */
 const getTagCategoryOptions = async () => {
-  const res = await listPictureTagCategoryUsingGet()
+  const res = await listPictureTagCategory()
   if (res.data.code === 0 && res.data.data) {
     tagList.value = res.data.data.tagList ?? []
     categoryList.value = res.data.data.categoryList ?? []
@@ -146,5 +156,20 @@ onMounted(() => {
 
 #homePage .tag-bar {
   margin-bottom: 16px;
+}
+
+#homePage .search-bar {
+  max-width: 600px;
+  margin: 0 auto 16px;
+  padding: 16px;
+  border-radius: 8px;
+  transition: all 0.3s;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+#homePage .search-bar .ant-input-search {
+  flex: 1;
 }
 </style>

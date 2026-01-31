@@ -1,5 +1,6 @@
 package com.yupi.yupicturebackend.controller;
 
+import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.RandomUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
@@ -14,6 +15,7 @@ import com.yupi.yupicturebackend.api.imagesearch.ImageSearchApiFacade;
 import com.yupi.yupicturebackend.api.imagesearch.model.ImageSearchResult;
 import com.yupi.yupicturebackend.common.BaseResponse;
 import com.yupi.yupicturebackend.common.DeleteRequest;
+import com.yupi.yupicturebackend.common.IdRequest;
 import com.yupi.yupicturebackend.common.ResultUtils;
 import com.yupi.yupicturebackend.constant.UserConstant;
 import com.yupi.yupicturebackend.exception.BusinessException;
@@ -25,28 +27,30 @@ import com.yupi.yupicturebackend.manager.auth.annotation.SaSpaceCheckPermission;
 import com.yupi.yupicturebackend.manager.auth.model.SpaceUserPermissionConstant;
 import com.yupi.yupicturebackend.model.dto.picture.*;
 import com.yupi.yupicturebackend.model.entity.Picture;
+import com.yupi.yupicturebackend.model.entity.PictureTask;
 import com.yupi.yupicturebackend.model.entity.Space;
 import com.yupi.yupicturebackend.model.entity.User;
 import com.yupi.yupicturebackend.model.enums.PictureReviewStatusEnum;
+import com.yupi.yupicturebackend.model.enums.PictureStyleEnum;
 import com.yupi.yupicturebackend.model.vo.PictureTagCategory;
 import com.yupi.yupicturebackend.model.vo.PictureVO;
 import com.yupi.yupicturebackend.service.PictureService;
+import com.yupi.yupicturebackend.service.PictureTaskService;
 import com.yupi.yupicturebackend.service.SpaceService;
 import com.yupi.yupicturebackend.service.UserService;
+import com.yupi.yupicturebackend.utils.SearchUtils;
+import jakarta.annotation.Resource;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.util.DigestUtils;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
-import javax.annotation.Resource;
-import javax.servlet.http.HttpServletRequest;
 import java.time.Duration;
 import java.util.Arrays;
-import java.util.Date;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
@@ -72,6 +76,9 @@ public class PictureController {
 
     @Resource
     private AliYunAiApi aliYunAiApi;
+
+    @Resource
+    private PictureTaskService pictureTaskService;
 
     @Resource
     private SpaceUserAuthManager spaceUserAuthManager;
@@ -166,7 +173,7 @@ public class PictureController {
      */
     @GetMapping("/get")
     @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
-    public BaseResponse<Picture> getPictureById(long id, HttpServletRequest request) {
+    public BaseResponse<Picture> getPictureById(@RequestParam(name = "id") long id, HttpServletRequest request) {
         ThrowUtils.throwIf(id <= 0, ErrorCode.PARAMS_ERROR);
         // 查询数据库
         Picture picture = pictureService.getById(id);
@@ -179,7 +186,7 @@ public class PictureController {
      * 根据 id 获取图片（封装类）
      */
     @GetMapping("/get/vo")
-    public BaseResponse<PictureVO> getPictureVOById(long id, HttpServletRequest request) {
+    public BaseResponse<PictureVO> getPictureVOById(@RequestParam(name = "id") long id, HttpServletRequest request) {
         ThrowUtils.throwIf(id <= 0, ErrorCode.PARAMS_ERROR);
         // 查询数据库
         Picture picture = pictureService.getById(id);
@@ -249,8 +256,35 @@ public class PictureController {
 //            }
         }
         // 查询数据库
-        Page<Picture> picturePage = pictureService.page(new Page<>(current, size),
-                pictureService.getQueryWrapper(pictureQueryRequest));
+        Boolean enableAdvanceSearch = pictureQueryRequest.getEnableAdvanceSearch();
+        Page<Picture> picturePage;
+        if (enableAdvanceSearch) {
+            // advance search：SQL 只保留指定条件，其他拼成搜索文本
+            String searchText = SearchUtils.buildAdvanceSearchText(pictureQueryRequest);
+            // 清空用于 SQL 查询的条件
+            pictureQueryRequest.setName(null);
+            pictureQueryRequest.setIntroduction(null);
+            pictureQueryRequest.setSearchText(null);
+            // SQL 查询
+            Page<Picture> filterPage = pictureService.page(new Page<>(current, size),
+                    pictureService.getQueryWrapper(pictureQueryRequest));
+            // 向量搜索
+            pictureService.searchPictureByText(searchText, filterPage);
+            // 分页返回
+            int fromIndex = (int) ((current - 1) * size);
+            int toIndex = Math.min(fromIndex + (int) size, filterPage.getRecords().size());
+            picturePage = new Page<>(current, size);
+            if (fromIndex >= filterPage.getRecords().size()) {
+                picturePage.setRecords(List.of());
+            } else {
+                picturePage.setRecords(filterPage.getRecords().subList(fromIndex, toIndex));
+            }
+            picturePage.setTotal(filterPage.getRecords().size());
+        } else {
+            pictureQueryRequest.setSearchText(pictureQueryRequest.getSearchText());
+            picturePage = pictureService.page(new Page<>(current, size),
+                    pictureService.getQueryWrapper(pictureQueryRequest));
+        }
         // 获取封装类
         return ResultUtils.success(pictureService.getPictureVOPage(picturePage, request));
     }
@@ -414,9 +448,131 @@ public class PictureController {
      * 查询 AI 扩图任务
      */
     @GetMapping("/out_painting/get_task")
-    public BaseResponse<GetOutPaintingTaskResponse> getPictureOutPaintingTask(String taskId) {
+    public BaseResponse<GetOutPaintingTaskResponse> getPictureOutPaintingTask(@RequestParam(name = "taskId") String taskId) {
         ThrowUtils.throwIf(StrUtil.isBlank(taskId), ErrorCode.PARAMS_ERROR);
         GetOutPaintingTaskResponse task = aliYunAiApi.getOutPaintingTask(taskId);
         return ResultUtils.success(task);
+    }
+
+    /**
+     * 获取支持的风格列表
+     */
+    @GetMapping("/style/list")
+    public BaseResponse<List<String>> listPictureStyles() {
+        return ResultUtils.success(PictureStyleEnum.getStyleList());
+    }
+
+    /**
+     * 风格转换单张图片
+     */
+    @PostMapping("/style/transfer")
+    @SaSpaceCheckPermission(value = SpaceUserPermissionConstant.PICTURE_EDIT)
+    public BaseResponse<Long> styleTransferPicture(@RequestBody PictureStyleTransferRequest request, HttpServletRequest httpRequest) {
+        ThrowUtils.throwIf(request == null || request.getPictureId() == null, ErrorCode.PARAMS_ERROR);
+        User loginUser = userService.getLoginUser(httpRequest);
+        return ResultUtils.success(pictureService.styleTransferPicture(request, loginUser));
+    }
+
+    /**
+     * 批量风格转换图片
+     */
+    @PostMapping("/style/transfer/batch")
+    @SaSpaceCheckPermission(value = SpaceUserPermissionConstant.PICTURE_EDIT)
+    public BaseResponse<List<Long>> styleTransferPictureByBatch(@RequestBody PictureStyleTransferTaskRequest request, HttpServletRequest httpRequest) {
+        ThrowUtils.throwIf(request == null || CollUtil.isEmpty(request.getPictureIdList()), ErrorCode.PARAMS_ERROR);
+        User loginUser = userService.getLoginUser(httpRequest);
+        List<Long> taskIdList = pictureService.styleTransferPictureByBatch(request, loginUser);
+        return ResultUtils.success(taskIdList);
+    }
+
+    /**
+     * 查询任务状态
+     */
+    @GetMapping("/task/get")
+    public BaseResponse<PictureTask> getPictureTask(@RequestParam(name = "taskId") Long taskId, HttpServletRequest request) {
+        ThrowUtils.throwIf(taskId == null || taskId <= 0, ErrorCode.PARAMS_ERROR);
+        User loginUser = userService.getLoginUser(request);
+        PictureTask task = pictureTaskService.getByIdAndUserId(taskId, loginUser.getId());
+        return ResultUtils.success(task);
+    }
+
+    /**
+     * 分页查询任务列表
+     */
+    @GetMapping("/task/list")
+    public BaseResponse<List<PictureTask>> listPictureTasks(
+            @RequestParam(name = "taskId") List<Long> taskIds,
+            HttpServletRequest request) {
+        ThrowUtils.throwIf(CollUtil.isEmpty(taskIds), ErrorCode.PARAMS_ERROR);
+        User loginUser = userService.getLoginUser(request);
+        return ResultUtils.success(pictureTaskService.listByUserId(loginUser.getId(), taskIds));
+    }
+
+    /**
+     * 应用任务结果到图片
+     */
+    @PostMapping("/apply")
+    @SaSpaceCheckPermission(value = SpaceUserPermissionConstant.PICTURE_EDIT)
+    public BaseResponse<Boolean> applyPictureTaskResult(@RequestBody PictureApplyRequest request, HttpServletRequest httpRequest) {
+        ThrowUtils.throwIf(request == null || request.getTaskId() == null || request.getPictureId() == null, ErrorCode.PARAMS_ERROR);
+        User loginUser = userService.getLoginUser(httpRequest);
+        pictureService.applyPictureTaskResult(request.getTaskId(), request.getPictureId(), loginUser);
+        return ResultUtils.success(true);
+    }
+
+    /**
+     * AI 生成图片标签
+     */
+    @PostMapping("/ai/generate/tags")
+    @SaSpaceCheckPermission(value = SpaceUserPermissionConstant.PICTURE_EDIT)
+    public BaseResponse<Long> generatePictureTags(@RequestBody IdRequest idRequest, HttpServletRequest request) {
+        ThrowUtils.throwIf(idRequest == null || idRequest.getId() == null, ErrorCode.PARAMS_ERROR);
+        User loginUser = userService.getLoginUser(request);
+        return ResultUtils.success(pictureService.generatePictureTags(idRequest.getId(), loginUser));
+    }
+
+    /**
+     * AI 批量生成图片标签
+     */
+    @PostMapping("/ai/generate/tags/batch")
+    @SaSpaceCheckPermission(value = SpaceUserPermissionConstant.PICTURE_EDIT)
+    public BaseResponse<List<Long>> generatePictureTagsByBatch(@RequestBody IdRequest idRequest, HttpServletRequest httpRequest) {
+        ThrowUtils.throwIf(idRequest == null || CollUtil.isEmpty(idRequest.getIds()), ErrorCode.PARAMS_ERROR);
+        User loginUser = userService.getLoginUser(httpRequest);
+        return ResultUtils.success(pictureService.generatePictureTagsByBatch(idRequest.getIds(), loginUser));
+    }
+
+    /**
+     * AI 重命名图片
+     */
+    @PostMapping("/ai/rename")
+    @SaSpaceCheckPermission(value = SpaceUserPermissionConstant.PICTURE_EDIT)
+    public BaseResponse<Long> renamePictureByAI(@RequestBody IdRequest idRequest, HttpServletRequest request) {
+        ThrowUtils.throwIf(idRequest == null || idRequest.getId() == null, ErrorCode.PARAMS_ERROR);
+        User loginUser = userService.getLoginUser(request);
+        return ResultUtils.success(pictureService.renamePictureByAI(idRequest.getId(), loginUser));
+    }
+
+    /**
+     * AI 批量重命名图片
+     */
+    @PostMapping("/ai/rename/batch")
+    @SaSpaceCheckPermission(value = SpaceUserPermissionConstant.PICTURE_EDIT)
+    public BaseResponse<List<Long>> renamePictureByAIByBatch(@RequestBody IdRequest idRequest, HttpServletRequest httpRequest) {
+        ThrowUtils.throwIf(idRequest == null || CollUtil.isEmpty(idRequest.getIds()), ErrorCode.PARAMS_ERROR);
+        User loginUser = userService.getLoginUser(httpRequest);
+        return ResultUtils.success(pictureService.renamePictureByAIByBatch(idRequest.getIds(), loginUser));
+    }
+
+    /**
+     * 根据图片搜索相似图片
+     */
+    @PostMapping("/ai/search/picture")
+    @SaSpaceCheckPermission(value = SpaceUserPermissionConstant.PICTURE_VIEW)
+    public BaseResponse<List<PictureVO>> searchPictureByAI(@RequestBody SearchPictureRequest searchPictureByTagsRequest, HttpServletRequest httpRequest) {
+        ThrowUtils.throwIf(searchPictureByTagsRequest == null || searchPictureByTagsRequest.getPictureId() == null, ErrorCode.PARAMS_ERROR);
+        int topK = searchPictureByTagsRequest.getTopK() != null ? searchPictureByTagsRequest.getTopK() : 10;
+        ThrowUtils.throwIf(topK > 20, ErrorCode.PARAMS_ERROR);
+        return ResultUtils.success(pictureService.searchPicture(searchPictureByTagsRequest, httpRequest));
     }
 }

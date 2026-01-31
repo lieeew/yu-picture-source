@@ -56,10 +56,10 @@ import { onMounted, reactive, ref } from 'vue'
 import { message } from 'ant-design-vue'
 import { SPACE_ROLE_OPTIONS } from '../../constants/space.ts'
 import {
-  addSpaceUserUsingPost,
-  deleteSpaceUserUsingPost,
-  editSpaceUserUsingPost,
-  listSpaceUserUsingPost,
+  addSpaceUser,
+  deleteSpaceUser,
+  editSpaceUser,
+  listSpaceUser,
 } from '@/api/spaceUserController.ts'
 import dayjs from 'dayjs'
 
@@ -97,7 +97,7 @@ const fetchData = async () => {
   if (!spaceId) {
     return
   }
-  const res = await listSpaceUserUsingPost({
+  const res = await listSpaceUser({
     spaceId,
   })
   if (res.data.code === 0 && res.data.data) {
@@ -121,7 +121,7 @@ const handleSubmit = async () => {
   if (!spaceId) {
     return
   }
-  const res = await addSpaceUserUsingPost({
+  const res = await addSpaceUser({
     spaceId,
     ...formData,
   })
@@ -136,7 +136,7 @@ const handleSubmit = async () => {
 
 // 编辑成员角色
 const editSpaceRole = async (value, record) => {
-  const res = await editSpaceUserUsingPost({
+  const res = await editSpaceUser({
     id: record.id,
     spaceRole: value,
   })
@@ -152,7 +152,7 @@ const doDelete = async (id: string) => {
   if (!id) {
     return
   }
-  const res = await deleteSpaceUserUsingPost({ id })
+  const res = await deleteSpaceUser({ id })
   if (res.data.code === 0) {
     message.success('删除成功')
     // 刷新数据

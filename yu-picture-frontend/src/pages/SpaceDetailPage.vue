@@ -80,11 +80,11 @@
 
 <script setup lang="ts">
 import { computed, h, onMounted, ref, watch } from 'vue'
-import { getSpaceVoByIdUsingGet } from '@/api/spaceController.ts'
+import { getSpaceVoById } from '@/api/spaceController.ts'
 import { message } from 'ant-design-vue'
 import {
-  listPictureVoByPageUsingPost,
-  searchPictureByColorUsingPost,
+  listPictureVoByPage,
+  searchPictureByColor,
 } from '@/api/pictureController.ts'
 import { formatSize } from '@/utils'
 import PictureList from '@/components/PictureList.vue'
@@ -118,7 +118,7 @@ const canDeletePicture = createPermissionChecker(SPACE_PERMISSION_ENUM.PICTURE_D
 // -------- 获取空间详情 --------
 const fetchSpaceDetail = async () => {
   try {
-    const res = await getSpaceVoByIdUsingGet({
+    const res = await getSpaceVoById({
       id: props.id,
     })
     if (res.data.code === 0 && res.data.data) {
@@ -158,7 +158,7 @@ const fetchData = async () => {
     spaceId: props.id,
     ...searchParams.value,
   }
-  const res = await listPictureVoByPageUsingPost(params)
+  const res = await listPictureVoByPage(params)
   if (res.data.code === 0 && res.data.data) {
     dataList.value = res.data.data.records ?? []
     total.value = res.data.data.total ?? 0
@@ -196,7 +196,7 @@ const onSearch = (newSearchParams: API.PictureQueryRequest) => {
 // 按照颜色搜索
 const onColorChange = async (color: string) => {
   loading.value = true
-  const res = await searchPictureByColorUsingPost({
+  const res = await searchPictureByColor({
     picColor: color,
     spaceId: props.id,
   })

@@ -115,5 +115,10 @@ public class PictureQueryRequest extends PageRequest implements Serializable {
      */
     private Date endEditTime;
 
+    /**
+     * 是否开启 AI 智能搜索
+     */
+    private Boolean enableAdvanceSearch = false;
+
     private static final long serialVersionUID = 1L;
 }

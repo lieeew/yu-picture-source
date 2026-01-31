@@ -27,7 +27,7 @@
 </template>
 <script lang="ts" setup>
 import { reactive } from 'vue'
-import { userLoginUsingPost } from '@/api/userController.ts'
+import { userLogin } from '@/api/userController.ts'
 import { useLoginUserStore } from '@/stores/useLoginUserStore.ts'
 import { message } from 'ant-design-vue'
 import router from '@/router' // 用于接受表单输入的值
@@ -45,7 +45,7 @@ const loginUserStore = useLoginUserStore()
  * @param values
  */
 const handleSubmit = async (values: any) => {
-  const res = await userLoginUsingPost(values)
+  const res = await userLogin(values)
   // 登录成功，把登录态保存到全局状态中
   if (res.data.code === 0 && res.data.data) {
     await loginUserStore.fetchLoginUser()

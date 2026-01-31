@@ -1,5 +1,5 @@
 <template>
-  <div class="picture-search-form">
+  <div class="picture-search-form" :class="{ 'advance-search-active': searchParams.enableAdvanceSearch }">
     <!-- 搜索表单 -->
     <a-form name="searchForm" layout="inline" :model="searchParams" @finish="doSearch">
       <a-form-item label="关键词" name="searchText">
@@ -56,6 +56,11 @@
       </a-form-item>
       <a-form-item>
         <a-space>
+          <a-switch
+            v-model:checked="searchParams.enableAdvanceSearch"
+            checked-children="AI搜索"
+            un-checked-children="普通搜索"
+          />
           <a-button type="primary" html-type="submit" style="width: 96px">搜索</a-button>
           <a-button html-type="reset" @click="doClear">重置</a-button>
         </a-space>
@@ -66,7 +71,7 @@
 <script lang="ts" setup>
 import { onMounted, reactive, ref } from 'vue'
 import dayjs from 'dayjs'
-import {listPictureTagCategoryUsingGet, listPictureVoByPageUsingPost} from '@/api/pictureController.ts'
+import {listPictureTagCategory, listPictureVoByPage} from '@/api/pictureController.ts'
 import { message } from 'ant-design-vue'
 
 interface Props {
@@ -92,7 +97,7 @@ const tagOptions = ref<string[]>([])
  * @param values
  */
 const getTagCategoryOptions = async () => {
-  const res = await listPictureTagCategoryUsingGet()
+  const res = await listPictureTagCategory()
   if (res.data.code === 0 && res.data.data) {
     tagOptions.value = (res.data.data.tagList ?? []).map((data: string) => {
       return {
@@ -154,6 +159,12 @@ const doClear = () => {
 </script>
 
 <style scoped>
+.picture-search-form {
+  padding: 16px;
+  border-radius: 8px;
+  transition: all 0.3s;
+}
+
 .picture-search-form .ant-form-item {
   margin-top: 16px;
 }

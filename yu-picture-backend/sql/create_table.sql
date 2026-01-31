@@ -122,3 +122,27 @@ ALTER TABLE user
     ADD COLUMN vipExpireTime datetime NULL COMMENT '会员过期时间',
     ADD COLUMN vipCode varchar(128) NULL COMMENT '会员兑换码',
     ADD COLUMN vipNumber bigint NULL COMMENT '会员编号';
+
+-- 图片任务表（支持异步任务：风格转换、打标签、重命名等）
+create table if not exists picture_task
+(
+    id                bigint auto_increment comment 'id' primary key,
+    taskType          varchar(50)                        not null comment '任务类型：STYLE_TRANSFER/TAG_RECOGNITION/RENAME',
+    originalPictureId bigint                             null comment '原始图片ID',
+    resultPictureId   bigint                             null comment '结果图片ID',
+    status            tinyint  default 0                 not null comment '状态：0-处理中 1-完成 2-失败',
+    userId            bigint                             not null comment '创建用户 id',
+    errorMessage      varchar(500)                       null comment '错误信息',
+    createTime        datetime default CURRENT_TIMESTAMP not null comment '创建时间',
+    updateTime        datetime default CURRENT_TIMESTAMP not null on update CURRENT_TIMESTAMP comment '更新时间',
+    -- 索引设计
+    INDEX idx_userId (userId),                       -- 提升按用户查询的性能
+    INDEX idx_taskType (taskType),                   -- 提升按任务类型查询的性能
+    INDEX idx_status (status),                       -- 提升按状态查询的性能
+    INDEX idx_originalPictureId (originalPictureId), -- 提升按原始图片查询的性能
+    INDEX idx_createTime (createTime)                -- 提升按创建时间排序查询的性能
+) comment '图片任务' collate = utf8mb4_unicode_ci;
+
+-- AI 图片描述信息
+ALTER TABLE picture
+    ADD COLUMN contentDescription text NULL COMMENT 'AI 图片描述信息' after tags;

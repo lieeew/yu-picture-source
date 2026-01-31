@@ -8,12 +8,11 @@ import com.yupi.yupicturebackend.manager.websocket.model.PictureEditRequestMessa
 import com.yupi.yupicturebackend.manager.websocket.model.PictureEditResponseMessage;
 import com.yupi.yupicturebackend.model.entity.User;
 import com.yupi.yupicturebackend.service.UserService;
+import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
-
-import javax.annotation.Resource;
 
 /**
  * 图片编辑事件处理器（消费者）

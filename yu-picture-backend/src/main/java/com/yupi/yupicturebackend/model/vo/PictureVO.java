@@ -1,5 +1,6 @@
 package com.yupi.yupicturebackend.model.vo;
 
+import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
 import com.yupi.yupicturebackend.model.entity.Picture;
 import lombok.Data;
@@ -89,6 +90,11 @@ public class PictureVO implements Serializable {
     private Long spaceId;
 
     /**
+     * 是否有内容描述
+     */
+    private Boolean hasContentDescription;
+
+    /**
      * 创建时间
      */
     private Date createTime;
@@ -138,8 +144,8 @@ public class PictureVO implements Serializable {
         }
         PictureVO pictureVO = new PictureVO();
         BeanUtils.copyProperties(picture, pictureVO);
-        // 类型不同，需要转换
         pictureVO.setTags(JSONUtil.toList(picture.getTags(), String.class));
+        pictureVO.setHasContentDescription(StrUtil.isNotBlank(picture.getContentDescription()));
         return pictureVO;
     }
 }

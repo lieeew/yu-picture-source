@@ -4,12 +4,11 @@ import com.lmax.disruptor.RingBuffer;
 import com.lmax.disruptor.dsl.Disruptor;
 import com.yupi.yupicturebackend.manager.websocket.model.PictureEditRequestMessage;
 import com.yupi.yupicturebackend.model.entity.User;
+import jakarta.annotation.PreDestroy;
+import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.WebSocketSession;
-
-import javax.annotation.PreDestroy;
-import javax.annotation.Resource;
 
 /**
  * 图片编辑事件生产者

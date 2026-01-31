@@ -38,8 +38,8 @@
 <script lang="ts" setup>
 import { onMounted, reactive, ref } from 'vue'
 import {
-  editPictureByBatchUsingPost,
-  listPictureTagCategoryUsingGet,
+  editPictureByBatch,
+  listPictureTagCategory,
 } from '@/api/pictureController.ts'
 import { message } from 'ant-design-vue'
 
@@ -83,7 +83,7 @@ const handleSubmit = async (values: any) => {
   if (!props.pictureList) {
     return
   }
-  const res = await editPictureByBatchUsingPost({
+  const res = await editPictureByBatch({
     pictureIdList: props.pictureList.map((picture) => picture.id),
     spaceId: props.spaceId,
     ...values,
@@ -106,7 +106,7 @@ const tagOptions = ref<string[]>([])
  * @param values
  */
 const getTagCategoryOptions = async () => {
-  const res = await listPictureTagCategoryUsingGet()
+  const res = await listPictureTagCategory()
   if (res.data.code === 0 && res.data.data) {
     tagOptions.value = (res.data.data.tagList ?? []).map((data: string) => {
       return {

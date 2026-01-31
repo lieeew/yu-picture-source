@@ -15,12 +15,20 @@ spring:
     url: jdbc:mysql://localhost:3306/yu_picture
     username: root
     password: 123456
+  # postgresql 数据源
+  postgresql:
+    datasource:
+      driver-class-name: org.postgresql.Driver
+      url: jdbc:postgresql://localhost:5432/postgres
+      username: postgresql
+      password: 123456
   # Redis 配置
-  redis:
-    database: 0
-    host: 127.0.0.1
-    port: 6379
-    timeout: 5000
+  data:
+    redis:
+      database: 0
+      host: 127.0.0.1
+      port: 6379
+      timeout: 5000
   # Session 配置
   session:
     store-type: redis
@@ -30,6 +38,21 @@ spring:
   servlet:
     multipart:
       max-file-size: 10MB
+  ai:
+    dashscope:
+      # 获取 KEY https://bailian.console.aliyun.com/cn-beijing/?tab=model#/api-key
+      api-key: <API-KEY>
+      chat:
+        options:
+          model: qwen-flash
+          temperature: 0.2
+          logprobs: true
+      image:
+        options:
+          model: qwen-image-edit-plus
+      embedding:
+        options:
+          model: text-embedding-v4
   # 空间图片分表
   shardingsphere:
     datasource:
@@ -69,17 +92,23 @@ mybatis-plus:
       logic-delete-field: isDelete # 全局逻辑删除的实体字段名
       logic-delete-value: 1 # 逻辑已删除值（默认为 1）
       logic-not-delete-value: 0 # 逻辑未删除值（默认为 0）
-# 接口文档配置
+# springdoc-openapi项目配置
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    tags-sorter: alpha
+    operations-sorter: alpha
+  api-docs:
+    path: /v3/api-docs
+  group-configs:
+    - group: 'default'
+      paths-to-match: '/**'
+      packages-to-scan: com.yupi.yupicturebackend.controller
+# knife4j的增强配置，不需要增强可以不配
 knife4j:
   enable: true
-  openapi:
-    title: 接口文档
-    version: 1.0
-    group:
-      default:
-        api-rule: package
-        api-rule-resources:
-          - com.yupi.yupicturebackend.controller
+  setting:
+    language: zh_cn
 ## 对象存储配置（需要从腾讯云获取）
 #cos:
 #  client:

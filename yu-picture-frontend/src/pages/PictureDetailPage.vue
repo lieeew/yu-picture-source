@@ -27,9 +27,18 @@
               {{ picture.category ?? '默认' }}
             </a-descriptions-item>
             <a-descriptions-item label="标签">
-              <a-tag v-for="tag in picture.tags" :key="tag">
-                {{ tag }}
-              </a-tag>
+              <a-space wrap :size="[4, 4]">
+                <a-tag v-for="tag in displayTags" :key="tag">
+                  {{ tag }}
+                </a-tag>
+                <a-tag
+                  v-if="showMoreButton"
+                  class="more-tag"
+                  @click.stop="toggleExpand"
+                >
+                  {{ isExpanded ? '收起' : `+${getAllTags().length - 5}个` }}
+                </a-tag>
+              </a-space>
             </a-descriptions-item>
             <a-descriptions-item label="格式">
               {{ picture.picFormat ?? '-' }}
@@ -74,6 +83,12 @@
             <a-button v-if="canEdit" :icon="h(EditOutlined)" type="default" @click="doEdit">
               编辑
             </a-button>
+            <a-button v-if="picture.hasContentDescription" type="default" @click="doAiSearch">
+              AI搜索
+              <template #icon>
+                <SearchOutlined />
+              </template>
+            </a-button>
             <a-button v-if="canDelete" :icon="h(DeleteOutlined)" danger @click="doDelete">
               删除
             </a-button>
@@ -87,12 +102,13 @@
 
 <script setup lang="ts">
 import { computed, h, onMounted, ref } from 'vue'
-import { deletePictureUsingPost, getPictureVoByIdUsingGet } from '@/api/pictureController.ts'
+import { deletePicture, getPictureVoById } from '@/api/pictureController.ts'
 import { message } from 'ant-design-vue'
 import {
   DeleteOutlined,
   DownloadOutlined,
   EditOutlined,
+  SearchOutlined,
   ShareAltOutlined,
 } from '@ant-design/icons-vue'
 import { useRouter } from 'vue-router'
@@ -106,6 +122,34 @@ interface Props {
 
 const props = defineProps<Props>()
 const picture = ref<API.PictureVO>({})
+
+// 展开/收起状态
+const isExpanded = ref(false)
+
+// 获取所有标签
+const getAllTags = () => {
+  // PictureVO.tags 已经是数组类型
+  return picture.value.tags ?? []
+}
+
+// 显示更多按钮的条件（超过5个标签时显示）
+const showMoreButton = computed(() => {
+  return getAllTags().length > 5
+})
+
+// 根据展开状态显示不同标签
+const displayTags = computed(() => {
+  const allTags = getAllTags()
+  if (isExpanded.value) {
+    return allTags
+  }
+  return allTags.slice(0, 5)
+})
+
+// 切换展开状态
+const toggleExpand = () => {
+  isExpanded.value = !isExpanded.value
+}
 
 // 通用权限检查函数
 function createPermissionChecker(permission: string) {
@@ -121,7 +165,7 @@ const canDelete = createPermissionChecker(SPACE_PERMISSION_ENUM.PICTURE_DELETE)
 // 获取图片详情
 const fetchPictureDetail = async () => {
   try {
-    const res = await getPictureVoByIdUsingGet({
+    const res = await getPictureVoById({
       id: props.id,
     })
     if (res.data.code === 0 && res.data.data) {
@@ -157,7 +201,7 @@ const doDelete = async () => {
   if (!id) {
     return
   }
-  const res = await deletePictureUsingPost({ id })
+  const res = await deletePicture({ id })
   if (res.data.code === 0) {
     message.success('删除成功')
   } else {
@@ -181,10 +225,33 @@ const doShare = () => {
     shareModalRef.value.openModal()
   }
 }
+
+// AI 搜索
+const doAiSearch = () => {
+  const pictureId = picture.value.id
+  if (!pictureId) {
+    return
+  }
+  // 跳转到 AI 标签搜索页面
+  router.push({
+    path: '/ai_search_picture',
+    query: {
+      pictureId,
+    },
+  })
+}
 </script>
 
 <style scoped>
 #pictureDetailPage {
   margin-bottom: 16px;
+}
+
+.more-tag {
+  cursor: pointer;
+}
+
+.more-tag:hover {
+  opacity: 0.8;
 }
 </style>
